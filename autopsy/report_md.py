@@ -85,6 +85,94 @@ def _trackers_md(t, full: bool) -> list[str]:
     return L
 
 
+def _ev(nav, eid):
+    """Render an evidence id with its signature from the nav map."""
+    if not eid:
+        return ""
+    sig = (nav.get(eid) or {}).get("sig", "")
+    return f"`{eid}` `{_t(sig, 90)}`" if sig else f"`{eid}`"
+
+
+def _paths_md(f: dict, full: bool) -> list[str]:
+    dp = f.get("delivery_paths") or {}
+    paths = dp.get("paths") or []
+    if not paths:
+        return []
+    nav = f.get("nav") or {}
+    cand_by_eid = {c.get("evidence_id"): c for c in f["seams"]["candidates"]}
+    L = ["## Delivery paths (connected flows)", ""]
+    L.append("Each path reads request/config → scheduling → playback/break detection → UI & seek → content "
+             "resume. App-owned boundaries rank first; vendor internals are summarized. Every item is a "
+             "hypothesis in state `candidate` — never a completed patch until runtime-verified.")
+    L.append("")
+    per_stage = 99 if full else 2
+    for p in paths:
+        L.append(f"### {p['label']}")
+        for wmsg in p.get("warnings", []):
+            L.append(f"> ⚠ {wmsg}")
+        L.append("")
+        if p.get("stages"):
+            L.append("_Flow: " + " → ".join(p["flow"]) + "_")
+            L.append("")
+        for st in ["request", "scheduling", "playback", "ui", "resume"]:
+            items = p.get("stages", {}).get(st)
+            if not items:
+                continue
+            from .paths import STAGE_LABEL
+            L.append(f"- **{STAGE_LABEL[st]}:**")
+            for it in items[:per_stage]:
+                c = cand_by_eid.get(it["evidence_id"], {})
+                L.append(f"  - {_ev(nav, it['evidence_id'])} — {it['role']} ({it['confidence']}) · "
+                         f"rank {it.get('ownership_rank')} · {_t(it.get('strategy'), 120)}")
+            if len(items) > per_stage:
+                L.append(f"  - … {len(items) - per_stage} more at this stage (report-full.md / nav.json)")
+        for it in (p.get("boundaries") or [])[: (99 if full else 4)]:
+            L.append(f"- {_ev(nav, it['evidence_id'])} — {it['role']} ({it['confidence']}) · "
+                     f"{_t(it.get('strategy'), 120)}")
+        for s in p.get("subsystems", []):
+            bnd = ", ".join(f"`{_t(b, 60)}`" for b in s["app_facing_boundaries"]) or "none surfaced"
+            L.append(f"- **subsystem {s['subsystem']}:** {s['vendor_classes']} vendor class(es), "
+                     f"{s['call_sites']} call site(s) — collapsed. App-facing: {bnd}.")
+            if s.get("warning"):
+                L.append(f"  - ⚠ {s['warning']}")
+        vchecks = p.get("verification", [])
+        if vchecks:
+            L.append(f"- **runtime checks:** " + " ".join(f"({i + 1}) {c}" for i, c in
+                                                          enumerate(vchecks[: (99 if full else 4)])))
+        L.append("")
+    return L
+
+
+def _regional_md(f: dict, full: bool) -> list[str]:
+    r = f.get("regional") or {}
+    if not r.get("present"):
+        return []
+    L = ["## Regional / configuration controls", ""]
+    if r.get("summary"):
+        L.append(r["summary"])
+        L.append("")
+    for o in r["overrides"]:
+        L.append(f"### {o['kind']}" + (f" — `{o['token']}`" if o.get("token") else ""))
+        if o.get("preference"):
+            L.append(f"- preference: `{o['preference']}`" + (f" (default `{o['default']}`)" if o.get("default") else ""))
+        if o.get("getters"):
+            L.append("- getter(s): " + ", ".join(f"`{_t(g, 100)}`" for g in o["getters"][: (8 if full else 2)]))
+        if o.get("setters"):
+            L.append("- setter(s): " + ", ".join(f"`{_t(s, 100)}`" for s in o["setters"][: (8 if full else 2)]))
+        if o.get("downstream_consumers"):
+            L.append("- downstream consumer(s): " + ", ".join(f"`{_t(c, 100)}`" for c in o["downstream_consumers"][: (8 if full else 2)]))
+        if o.get("normalization"):
+            L.append("- normalization: " + ", ".join(f"`{_t(n, 100)}`" for n in o["normalization"][:4]))
+        if o.get("region_values"):
+            L.append("- region values: " + ", ".join(f"`{v}`" for v in o["region_values"]))
+        if o.get("evidence_strings"):
+            L.append("- strings: " + ", ".join(f"`{_t(s, 60)}`" for s in o["evidence_strings"][:5]))
+        L.append(f"- confidence: {o.get('confidence')}")
+        L.append(f"- ⚠ limitation: {o['limitation']}")
+        L.append("")
+    return L
+
+
 def render(f: dict, full: bool = False) -> str:
     m = f["manifest"]
     code = f["code"]
@@ -115,6 +203,9 @@ def render(f: dict, full: bool = False) -> str:
     L.append("## Investigation points (prioritised)")
     L += [f"{i}. {p}" for i, p in enumerate(f.get("plan", []), 1)]
     L.append("")
+
+    L += _paths_md(f, full)
+    L += _regional_md(f, full)
 
     if ka:
         L.append(f"## Known app: {ka['key']} — shipped fingerprints vs this build")
@@ -191,26 +282,34 @@ def render(f: dict, full: bool = False) -> str:
     cands = f["seams"]["candidates"]
     L.append("## Seam candidates (ranked)")
     L.append("")
-    L.append(_table(["#", "Score", "Method", "Why", "Fingerprint"],
-                    [(i, c["score"], c["sig"], "; ".join(c["why"]),
-                      ("unique" if c.get("fingerprint", {}).get("unique") else f"{c['fingerprint']['matches']} matches")
-                      if c.get("fingerprint") else "")
-                     for i, c in enumerate(cands[: (60 if full else 20)], 1)]))
+    L.append(_table(["#", "E", "Score", "Role (conf)", "Method", "Why"],
+                    [(i, c.get("evidence_id", ""), c["score"],
+                      f"{c.get('role', '')} ({c.get('confidence', '')})", c["sig"], "; ".join(c["why"]))
+                     for i, c in enumerate(cands[: (60 if full else 12)], 1)]))
     L.append("")
     if full:
         detail = cands[:25]
     else:
         drafted = {h["sig"] for h in (f.get("drafts") or {}).get("hooks", [])}
         detail = [c for c in cands if c["sig"] in drafted] + \
-                 [c for c in cands if c["sig"] not in drafted][: max(2, 6 - len(drafted))]
-        L.append("_Details: candidate seams first, then the top items that need a closer read._")
+                 [c for c in cands if c["sig"] not in drafted][: max(1, 3 - len(drafted))]
+        L.append("_Details for a few leads below; the Delivery-paths section above connects them by flow. "
+                 "Full per-candidate detail and the exhaustive tables are in report-full.md._")
         L.append("")
     drafted_sigs = {h["sig"] for h in (f.get("drafts") or {}).get("hooks", [])}
     for i, c in enumerate(detail, 1):
         show_code = full or (c["sig"] in drafted_sigs and i <= 4)
-        L.append(f"### {i}. `{c['sig']}`")
+        L.append(f"### {i}. `{c['sig']}`" + (f"  [{c['evidence_id']}]" if c.get("evidence_id") else ""))
         L.append(f"- score {c['score']} · {c['insns']} insns · source `{c['source']}`" +
                  (f" · vendor {c['vendor']}" if c["vendor"] else ""))
+        if c.get("role"):
+            L.append(f"- **role:** {c['role']} ({c.get('confidence')}) · state `{c.get('state')}` · "
+                     f"evidence {', '.join(c.get('evidence_basis') or []) or '—'}"
+                     + (f" · paths {', '.join(c['mechanisms'])}" if c.get("mechanisms") else ""))
+        loc = (f.get("nav") or {}).get(c.get("evidence_id"))
+        if loc:
+            where = loc.get("smali_file") or loc.get("show")
+            L.append(f"- locator: `{_t(where, 140)}`")
         L.append(f"- **strategy:** {c['strategy']}")
         if c.get("callers"):
             L.append("- callers: " + ", ".join(f"`{_t(x['sig'], 120)}`" for x in c["callers"][: (4 if full else 2)]))
@@ -248,7 +347,7 @@ def render(f: dict, full: bool = False) -> str:
         L.append("")
 
     hc = f["seams"]["hot_classes"]
-    if hc:
+    if hc and full:
         hints = f["seams"].get("deobfuscation_hints", {})
         L.append("## Hot classes")
         L.append("")
@@ -258,7 +357,7 @@ def render(f: dict, full: bool = False) -> str:
         L.append("")
 
     ar = f.get("seams_ad_resources") or []
-    if ar:
+    if ar and full:
         L.append("## Ad-named resources referenced from code")
         L.append("Literal resource ids are stable fingerprint anchors (they survive R8 renames).")
         L.append("")
@@ -277,7 +376,7 @@ def render(f: dict, full: bool = False) -> str:
                           ", ".join(n["ad_strings"]), ", ".join(n["seam_imports"]), ", ".join(n["dlopen_targets"][:4]))
                          for n in nat[: (40 if full else 15)]]))
         L.append("")
-        for n in nat[:4]:
+        for n in (nat[:4] if full else []):
             if n["ad_strings"]:
                 L.append(f"**{n['lib']}** ad strings:")
                 for label, ex in n["ad_strings"].items():
@@ -366,11 +465,12 @@ def render(f: dict, full: bool = False) -> str:
     L.append("## Next queries (run locally, paste results back)")
     L.append("")
     L.append("```")
-    L.append("autopsy show   <out> 'Lcls;->method(params)ret'   # smali of one method")
-    L.append("autopsy java   <out> 'Lcls;'                       # jadx decompile of one class")
-    L.append("autopsy xref   <out> 'getAdCuePoints'               # who calls it")
-    L.append("autopsy strings <out> 'adBreak'                     # which methods use the string")
-    L.append("seamhunter fp  <out> 'Lcls;->method(...)R'          # draft + verify a matcher descriptor")
-    L.append("autopsy serve  <out>                                # browse everything in the browser")
+    L.append("seamhunter show  <out> 'Lcls;->method(params)ret'   # smali of one method (E-ids map in nav.json)")
+    L.append("seamhunter java  <out> 'Lcls;'                       # jadx decompile of one class")
+    L.append("seamhunter xref  <out> 'getAdCuePoints'              # who calls it")
+    L.append("seamhunter strings <out> 'adBreak'                   # which methods use the string")
+    L.append("seamhunter fp    <out> 'Lcls;->method(...)R'         # draft + verify a matcher descriptor")
+    L.append("seamhunter serve <out>                               # browse everything in the browser")
     L.append("```")
+    L.append("_(`autopsy …` is the legacy alias for `seamhunter …`.)_")
     return "\n".join(L) + "\n"

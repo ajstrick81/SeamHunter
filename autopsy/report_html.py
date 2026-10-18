@@ -64,7 +64,8 @@ def render(f: dict) -> str:
     ka = f.get("known_app")
     title = f"{m.get('package')} {m.get('versionName') or ''}"
     S = []
-    nav = [("plan", "Plan"), ("known", "Known app"), ("stack", "Ad stack"), ("ip", "Integration points"),
+    nav = [("plan", "Plan"), ("paths", "Delivery paths"), ("regional", "Regional"),
+           ("known", "Known app"), ("stack", "Ad stack"), ("ip", "Integration points"),
            ("cands", "Seam candidates"), ("hot", "Hot classes"), ("native", "Native"), ("assets", "Assets"),
            ("hosts", "Hosts"), ("prot", "Protections"), ("manifest", "Manifest"), ("code", "Code")]
     S.append(f"<header><h1>APK autopsy · {e(title)}</h1><div class='sub'>{e(f['tool'])} · {e(f['elapsed_seconds'])} s · "
@@ -82,6 +83,54 @@ def render(f: dict) -> str:
     S.append("</div></section>")
     S.append("<section id='plan'><h2>Investigation points</h2><ol class='plan'>" +
              "".join(f"<li>{e(p)}</li>" for p in f.get("plan", [])) + "</ol></section>")
+    dp = (f.get("delivery_paths") or {}).get("paths") or []
+    navmap = f.get("nav") or {}
+    if dp:
+        from .paths import STAGE_LABEL
+        S.append("<section id='paths'><h2>Delivery paths (connected flows)</h2>"
+                 "<p class='mute'>App-owned boundaries first; vendor internals summarized. Each item is a "
+                 "hypothesis in state <code>candidate</code> until runtime-verified.</p>")
+        for p in dp:
+            S.append(f"<h3>{e(p['label'])}</h3>")
+            for wmsg in p.get("warnings", []):
+                S.append(f"<p class='warn'>⚠ {e(wmsg)}</p>")
+            if p.get("stages"):
+                S.append(f"<p class='mute'>Flow: {e(' → '.join(p['flow']))}</p>")
+            S.append("<ul>")
+            for st in ["request", "scheduling", "playback", "ui", "resume"]:
+                for it in p.get("stages", {}).get(st, []):
+                    sig = (navmap.get(it["evidence_id"]) or {}).get("sig", "")
+                    S.append(f"<li><b>{e(STAGE_LABEL[st])}</b> <span class='chip'>{e(it['evidence_id'])}</span> "
+                             f"{code(sig)} — {e(it['role'])} <span class='mute'>({e(it['confidence'])}, rank {e(it.get('ownership_rank'))})</span></li>")
+            for it in p.get("boundaries", []):
+                sig = (navmap.get(it["evidence_id"]) or {}).get("sig", "")
+                S.append(f"<li><span class='chip'>{e(it['evidence_id'])}</span> {code(sig)} — {e(it['role'])} "
+                         f"<span class='mute'>({e(it['confidence'])})</span></li>")
+            for s in p.get("subsystems", []):
+                S.append(f"<li class='mute'>subsystem <b>{e(s['subsystem'])}</b>: {s['vendor_classes']} vendor class(es), "
+                         f"{s['call_sites']} call site(s) collapsed — {e(s.get('warning') or '')}</li>")
+            S.append("</ul>")
+            if p.get("verification"):
+                S.append("<details><summary>runtime-verification plan</summary><ol>" +
+                         "".join(f"<li>{e(v)}</li>" for v in p["verification"]) + "</ol></details>")
+        S.append("</section>")
+    r = f.get("regional") or {}
+    if r.get("present"):
+        S.append("<section id='regional'><h2>Regional / configuration controls</h2>")
+        S.append(f"<p class='mute'>{e(r.get('summary') or '')}</p>")
+        for o in r["overrides"]:
+            S.append(f"<h3>{e(o['kind'])}{' — ' + code(o['token']) if o.get('token') else ''}</h3><ul>")
+            if o.get("preference"):
+                S.append(f"<li>preference {code(o['preference'])} (default {code(o.get('default'))})</li>")
+            for lbl, key in (("getter(s)", "getters"), ("setter(s)", "setters"),
+                             ("downstream", "downstream_consumers"), ("normalization", "normalization")):
+                if o.get(key):
+                    S.append(f"<li>{lbl}: " + ", ".join(code(x) for x in o[key][:6]) + "</li>")
+            if o.get("region_values"):
+                S.append("<li>region values: " + ", ".join(code(v) for v in o["region_values"]) + "</li>")
+            S.append(f"<li>confidence {e(o.get('confidence'))}</li>")
+            S.append(f"<li class='warn'>⚠ {e(o['limitation'])}</li></ul>")
+        S.append("</section>")
     if ka:
         S.append(f"<section id='known'><h2>Known app: {e(ka['key'])}</h2><div class='kv'>")
         for k in ("engine", "runtime", "delivery", "seam", "action", "drift", "patch_evidence", "device_signature"):

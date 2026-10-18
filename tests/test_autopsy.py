@@ -338,3 +338,196 @@ class Regressions(unittest.TestCase):
         self.assertFalse(rx.search("Ldalvik/system/BaseDexClassLoader;-><init>(...)V"))
         self.assertTrue(rx.search("Ldalvik/system/DexClassLoader;-><init>(...)V"))
         self.assertTrue(rx.search("Ldalvik/system/InMemoryDexClassLoader;-><init>(...)V"))
+
+
+class DeliveryPaths(unittest.TestCase):
+    """Priority-1/2 synthesis on the synthetic Tubi-like fixture (tubi_like.apk): connected
+    delivery-path profiles, ownership ranking, subsystem dedup, mechanism/role classification,
+    regional-controls discovery, navigation index and runtime-verification contracts. Every
+    assertion runs over the normal end-to-end scan path, not an isolated helper."""
+
+    def _cand(self, f, needle):
+        return next(c for c in f["seams"]["candidates"] if needle in c["sig"])
+
+    def test_six_mechanisms_are_separated(self):
+        f, _ = scan("tubi_like.apk")
+        ids = {p["id"] for p in f["delivery_paths"]["paths"]}
+        # separate IMA client, IMA DAI, Yospace/SSAI, media3 and pause-ad paths (acceptance #1)
+        self.assertEqual(ids, {"csai", "dai", "ssai", "media3", "pause", "telemetry"})
+
+    def test_path_groups_multiple_methods_into_one_flow(self):
+        f, _ = scan("tubi_like.apk")
+        csai = next(p for p in f["delivery_paths"]["paths"] if p["id"] == "csai")
+        # request → scheduling → resume all populated from distinct methods = a connected flow
+        self.assertIn("request", csai["stages"])
+        self.assertIn("scheduling", csai["stages"])
+        sigs = [it["sig"] for items in csai["stages"].values() for it in items]
+        self.assertTrue(any("requestAds" in s for s in sigs))
+        self.assertTrue(any("getAdBreaks" in s for s in sigs))
+
+    def test_app_owned_boundaries_rank_above_ui_and_telemetry(self):
+        f, _ = scan("tubi_like.apk")
+        req = self._cand(f, "requestAds")           # app-owned request boundary
+        ui = self._cand(f, "ImagePauseAds;->m")     # ad UI
+        tel = self._cand(f, "fireAdImpression")     # telemetry only
+        self.assertLess(req["ownership_rank"], ui["ownership_rank"])
+        self.assertLess(ui["ownership_rank"], tel["ownership_rank"])
+        self.assertEqual(tel["ownership_rank"], 7)  # telemetry is last
+
+    def test_large_vendor_subsystem_is_deduplicated(self):
+        f, _ = scan("tubi_like.apk")
+        ssai = next(p for p in f["delivery_paths"]["paths"] if p["id"] == "ssai")
+        yo = next(s for s in ssai["subsystems"] if s["subsystem"] == "Yospace")
+        self.assertGreaterEqual(yo["vendor_classes"], 10)
+        self.assertGreater(yo["call_sites"], 0)
+        # the 17 Yospace internals are summarized, never enumerated as candidates (acceptance #4)
+        self.assertFalse(any("com/yospace/" in c["sig"] for c in f["seams"]["candidates"]))
+
+    def test_mechanism_and_role_classification(self):
+        f, _ = scan("tubi_like.apk")
+        self.assertEqual(self._cand(f, "requestAds")["role"], "strong intervention candidate")
+        self.assertEqual(self._cand(f, "getAdBreaks")["role"], "confirmed delivery boundary")
+        self.assertEqual(self._cand(f, "ImagePauseAds;->m")["role"], "UI only")
+        self.assertEqual(self._cand(f, "fireAdImpression")["role"], "telemetry/measurement only")
+        self.assertEqual(self._cand(f, "onAdBreakStarted")["role"], "playback/break/resume control")
+
+    def test_confidence_downgrades_on_string_only_evidence(self):
+        f, _ = scan("tubi_like.apk")
+        dai_url = self._cand(f, "requestVODDAIUrl")   # only a vendor-host string, no structural evidence
+        self.assertEqual(dai_url["evidence_basis"], ["string"])
+        self.assertEqual(dai_url["role"], "requires runtime evidence")
+        self.assertEqual(dai_url["confidence"], "low")
+        self.assertEqual(dai_url["state"], "requires_runtime")
+
+    def test_ssai_warns_stitched_media_is_not_removed_by_suppression(self):
+        f, _ = scan("tubi_like.apk")
+        for pid in ("ssai", "dai"):
+            p = next(x for x in f["delivery_paths"]["paths"] if x["id"] == pid)
+            self.assertTrue(p["server_stitched"])
+            self.assertTrue(any("does NOT remove the ad media" in w for w in p["warnings"]))
+
+    def test_runtime_verification_on_every_hypothesis(self):
+        f, _ = scan("tubi_like.apk")
+        # every path carries a verification contract and every candidate a (non-completed) state
+        self.assertTrue(all(p["verification"] for p in f["delivery_paths"]["paths"]))
+        self.assertTrue(all(c["state"] in ("candidate", "requires_runtime")
+                            for c in f["seams"]["candidates"]))
+
+    def test_regional_chain_reconstructed_through_obfuscation(self):
+        f, _ = scan("tubi_like.apk")
+        r = f["regional"]
+        self.assertTrue(r["present"])
+        country = next(o for o in r["overrides"] if o["kind"].startswith("country"))
+        # the fixture's chain is R8-obfuscated (getter `u`, setter `e0`, consumers `e`/`p`): the
+        # reconstruction must come from the key string + field/SharedPreferences edges, not names
+        self.assertIn("sudoCountryOverride", country["key_strings"])
+        self.assertEqual(country["default"], "Default")
+        self.assertTrue(any("->u(" in g and "SharedPreferences.get" in g for g in country["getters"]))
+        self.assertTrue(any("->e0(" in s and "put" in s for s in country["setters"]))
+        self.assertTrue(country["fields"])                      # the override field was identified
+        # downstream consumers reached by call/field edge (RemoteConfig `e`, isCountry-style `p`)
+        consumers = " ".join(country["downstream_consumers"])
+        self.assertIn("->e(", consumers)
+        self.assertIn("->p(", consumers)
+        self.assertTrue(country["normalization"])               # a connected method compares region codes
+        self.assertEqual(country["confidence"], "high")
+        self.assertIn("data flow", country["reconstructed_by"])
+        self.assertIn("not", country["limitation"].lower())     # client-side only, not a geoblock bypass
+
+    def test_kotlin_delegated_property_reconstruction(self):
+        # Real Tubi exposes the override via a Kotlin delegated property, not a direct field: the name
+        # string lives only in <clinit>, and u()/e0() reach the value through a delegate field +
+        # KProperty slot via getValue/setValue. (tubi_delegated.apk models exactly this.)
+        f, _ = scan("tubi_delegated.apk")
+        r = f["regional"]
+        country = next(o for o in r["overrides"] if o["kind"].startswith("country"))
+        self.assertIn("sudoCountryOverride", country["key_strings"])
+        self.assertEqual(country["default"], "Default")
+        self.assertEqual(country["confidence"], "high")
+        getters = " ".join(country["getters"])
+        setters = " ".join(country["setters"])
+        # bridged by the KProperty SLOT, not the name: the metadata keeps the original
+        # `getSudoCountryOverride` while the method is renamed to `u()`; we resolve `u()` via slot 0.
+        self.assertTrue(any("slot" in g.lower() for g in country["getters"]))
+        self.assertIn("->u()Ljava/lang/String;", getters)
+        self.assertNotIn("getSudoCountryOverride", getters)      # metadata name is not the real method
+        # NOT the unrelated String property v()/f0() (slot 1), NOT the Lazy<File> decoy s(), NOT <clinit>
+        self.assertNotIn("->v()", getters)                       # unrelated String delegated property
+        self.assertNotIn("Ljava/io/File;", getters)              # Lazy<File> decoy rejected
+        self.assertIn("->e0(", setters)
+        self.assertNotIn("->f0(", setters)                       # the other property's setter
+        self.assertFalse(any("<clinit>" in s or "<init>" in s for s in country["setters"]))
+        # the delegate field is identified (LWh/b;->s), and the KProperty[] array `b` is NOT a field
+        self.assertTrue(any(";->s:" in fr for fr in country["fields"]))
+        self.assertFalse(any("KProperty" in fr for fr in country["fields"]))
+        consumers = " ".join(country["downstream_consumers"])
+        self.assertIn("->e(", consumers)                         # RemoteConfig consumer, by edge
+        self.assertIn("->p(", consumers)                         # isCountry-style comparator
+        self.assertNotIn("->u(", consumers)                      # the accessors are not their own consumers
+        self.assertNotIn("->e0(", consumers)
+
+    def test_consent_and_experiment_region_kept_separate(self):
+        f, _ = scan("tubi_like.apk")
+        kinds = {o["kind"] for o in f["regional"]["overrides"]}
+        self.assertIn("consent geolocation", kinds)     # OneTrust-style, NOT content availability
+        self.assertIn("experiment region", kinds)       # mockRegion, distinct from country override
+        experiment = next(o for o in f["regional"]["overrides"] if o["kind"] == "experiment region")
+        self.assertIn("mockRegion", experiment["key_strings"])
+        consent = next(o for o in f["regional"]["overrides"] if o["kind"] == "consent geolocation")
+        self.assertIn("not content availability", consent["limitation"].lower().replace(",", ""))
+
+    def test_integration_site_survives_into_a_path(self):
+        # P1 fix: a Media3 AdsMediaSource boundary that is an integration site but never became a
+        # ranked candidate must still appear in the media3 path (built from the union, not candidates).
+        from autopsy import paths
+        f = {"sdks": [], "seams": {
+            "candidates": [],
+            "integration_points": [{"id": "media3-ads-media-source", "engine": "media3",
+                                    "strategy": "media3 client VOD ad path", "count": 1,
+                                    "sites": [{"id": 9001, "sig": "LUc/e$a;->a(Landroidx/media3/exoplayer/source/MediaSource;)V",
+                                               "calls": "x", "evidence_id": "E1"}]}],
+            "implementers": []}}
+        dp = paths.build(f)
+        m3 = next(p for p in dp["paths"] if p["id"] == "media3")
+        sigs = [it["sig"] for items in m3["stages"].values() for it in items]
+        self.assertIn("LUc/e$a;->a(Landroidx/media3/exoplayer/source/MediaSource;)V", sigs)
+
+    def test_states_vocabulary_includes_requires_runtime(self):
+        f, _ = scan("tubi_like.apk")
+        self.assertIn("requires_runtime", f["delivery_paths"]["states"])
+        self.assertIn("candidate", f["delivery_paths"]["states"])
+
+    def test_nav_index_case_sensitive_with_bounded_snippets(self):
+        import json
+        f, out = scan("tubi_like.apk")
+        with open(os.path.join(out, "nav.json"), encoding="utf-8") as fh:
+            nav = json.load(fh)
+        key = next(k for k in nav["classes"] if "AdScheduleProvider" in k)
+        self.assertIn(key, nav["classes"])
+        self.assertNotIn(key.lower(), nav["classes"])     # descriptors are case-sensitive
+        # every candidate has an evidence id that resolves in nav, with a bounded snippet + locator
+        self.assertTrue(all(c.get("evidence_id") for c in f["seams"]["candidates"]))
+        eid = self._cand(f, "getAdBreaks")["evidence_id"]
+        ev = nav["evidence"][eid]
+        self.assertLessEqual(ev["snippet"].count("\n") + 1, 30)
+        self.assertIn("seamhunter show", ev["locator"]["show"])
+
+    def test_short_brief_is_smaller_than_full_evidence_layer(self):
+        from autopsy import report_md
+        f, _ = scan("tubi_like.apk")
+        short = report_md.render(f, full=False)
+        full = report_md.render(f, full=True)
+        self.assertIn("Delivery paths", short)
+        self.assertIn("Regional / configuration controls", short)
+        self.assertLess(len(short), len(full) * 0.85)     # materially smaller (acceptance #9)
+
+    def test_compact_brief_layer(self):
+        from autopsy import report_brief, report_md
+        f, _ = scan("tubi_like.apk")
+        brief = report_brief.render(f)
+        # the brief is the smallest layer: a fraction of report.md, but still carries the essentials
+        self.assertLess(len(brief), len(report_md.render(f, full=False)) * 0.6)
+        self.assertIn("Delivery paths", brief)
+        self.assertIn("Regional / configuration controls", brief)
+        self.assertIn("E", brief)                         # evidence IDs
+        self.assertIn("seamhunter show", brief)

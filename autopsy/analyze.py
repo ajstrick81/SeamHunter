@@ -276,10 +276,13 @@ class Autopsy:
         self._stage("seams", self._seams)
         if self.java:
             self._stage("java", self._java)
+        if self.apktool:
+            self._stage("apktool", self._apktool)  # before nav, so it can map to the smali tree
+        self._stage("regional", self._regional)
+        self._stage("delivery_paths", self._delivery_paths)
+        self._stage("nav", self._nav)
         self.log("[8/9] known-app drift check")
         self._stage("drift", self._drift)
-        if self.apktool:
-            self._stage("apktool", self._apktool)
         self.f["elapsed_seconds"] = round(time.time() - t0, 1)
         from .drafts import render as render_drafts
         self.f["drafts"] = self._stage("drafts", render_drafts, self.f, self.out)
@@ -825,6 +828,21 @@ class Autopsy:
                 c["java"] = java_method_excerpt(src, c["name"], len(split_params_(c["params"])))
         self.f["java"] = {"available": True, "classes": [os.path.join("java", re.sub(r"[^\w.$-]", "_", c[1:-1].replace("/", ".")) + ".java")
                                                          for c in done]}
+
+    # ------------------------------------------------------------ regional / paths / nav
+    def _regional(self):
+        from . import regional
+        self.f["regional"] = regional.detect(self.idx, self.bundle)
+
+    def _delivery_paths(self):
+        from . import nav, paths
+        # evidence IDs first (candidates/implementers/sites), then the connected per-mechanism profiles
+        self._ev = nav.assign_evidence(self.f)
+        self.f["delivery_paths"] = paths.build(self.f)
+
+    def _nav(self):
+        from . import nav
+        self.f["nav"] = nav.build(self.idx, self.f, self.out, getattr(self, "_ev", {"by_mid": {}, "order": []}))
 
     def _apktool(self):
         from .tools import apktool_tree

@@ -17,10 +17,13 @@ def _out_for(path: str) -> str:
 
 def cmd_scan(a):
     from .analyze import Autopsy
-    from . import report_html, report_md
+    from . import report_brief, report_html, report_md
     out = a.out or _out_for(a.input)
     f = Autopsy(a.input, out, log=(lambda *x: None) if a.quiet else print,
                 deep_native=not a.fast, java=not a.no_java, apktool=a.apktool).run()
+    brief = report_brief.render(f)
+    with open(os.path.join(out, "brief.md"), "w", encoding="utf-8") as fh:
+        fh.write(brief)
     md = report_md.render(f, full=False)
     with open(os.path.join(out, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(md)
@@ -29,7 +32,8 @@ def cmd_scan(a):
     html_path = os.path.join(out, "report.html")
     with open(html_path, "w", encoding="utf-8") as fh:
         fh.write(report_html.render(f))
-    print(f"\nreport.md ({len(md) // 1024} KB, for Claude) · report-full.md · report.html · report.json · index.sqlite")
+    print(f"\nbrief.md ({len(brief) // 1024} KB) · report.md ({len(md) // 1024} KB) · report-full.md · "
+          f"report.html · report.json · index.sqlite · nav.json")
     print(f"  -> {out}")
     if a.open:
         import pathlib
@@ -182,12 +186,13 @@ def cmd_stream(a):
 
 
 def cmd_report(a):
-    from . import report_html, report_md
+    from . import report_brief, report_html, report_md
     if not os.path.exists(os.path.join(a.out, "report.json")):
-        raise SystemExit(f"no report.json in {a.out} — run `autopsy scan` first")
+        raise SystemExit(f"no report.json in {a.out} — run `seamhunter scan` first")
     with open(os.path.join(a.out, "report.json"), encoding="utf-8") as fh:
         f = json.load(fh)
-    for name, text in (("report.md", report_md.render(f)), ("report-full.md", report_md.render(f, full=True)),
+    for name, text in (("brief.md", report_brief.render(f)),
+                       ("report.md", report_md.render(f)), ("report-full.md", report_md.render(f, full=True)),
                        ("report.html", report_html.render(f))):
         with open(os.path.join(a.out, name), "w", encoding="utf-8") as fh:
             fh.write(text)
@@ -199,8 +204,8 @@ def main(argv=None):
     for stream in (sys.stdout, sys.stderr):  # None under pythonw (the GUI shortcut)
         if stream is not None and hasattr(stream, "reconfigure") and not stream.isatty():
             stream.reconfigure(encoding="utf-8", errors="replace")
-    p = argparse.ArgumentParser(prog="autopsy", description="Deep static ad-seam analyzer for APK/APKM/XAPK bundles "
-                                                            "(analysis only — it never patches).")
+    p = argparse.ArgumentParser(prog="seamhunter", description="Deep static ad-seam analyzer for APK/APKM/XAPK bundles "
+                                                              "(analysis only — it never patches). `autopsy` is a legacy alias.")
     p.add_argument("--version", action="version", version=__version__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
