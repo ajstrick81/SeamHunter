@@ -1,0 +1,22 @@
+{
+ "source": "generic ad-delivery taxonomy (no app-specific catalog ships with SeamHunter)",
+ "note": "The `apps` map is intentionally empty. Populate it locally with your own fingerprints to enable known-app drift checks; nothing app-specific is distributed.",
+ "engines": {
+  "ima-dai": {
+   "label": "Google IMA / DAI client SDK",
+   "shape": "The app's player asks Google's IMA SDK (client-side) or DAI (server-stitched pods) for ad breaks. The ad schedule surfaces in Java/Kotlin as cue points, ad-break lists or an AdsManager.",
+   "portable_seams": "Cue-point / ad-break accessors, AdsManager.start, the SSAI AdsLoader getter, and live-pod handling are the usual crossing points. Seams found in one IMA app usually resemble the next."
+  },
+  "ssai-manifest": {
+   "label": "Server-side stitching (SSAI) via manifest",
+   "shape": "The CDN stitches ads into the stream itself. The only client-visible trace is the manifest (ad periods, DateRanges, ID3/beacon tags) and the host names that serve it.",
+   "portable_seams": "The manifest and its origin/CDN hosts; ad periods and DateRange markers; for live passthrough SSAI the break boundary is the only client-side signal."
+  },
+  "proprietary": {
+   "label": "Proprietary native / JS ad engine",
+   "shape": "The ad decision lives in the app's own runtime — a native library, a JS VM inside a .so, or a WebView — not in a standard SDK.",
+   "portable_seams": "Where the ad schedule crosses into the player (a response buffer, a JS function, an insertion-point accessor); native seams differ per build."
+  }
+ },
+ "apps": {}
+}

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seamhunter"
+version = "1.0.0"
+description = "SeamHunter — local static analyzer for Android (TV) APK/APKM bundles: finds where ads, trackers and protections are wired in. Analysis only; never modifies an APK."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "ajstrick81" }]
+keywords = ["android", "apk", "reverse-engineering", "static-analysis", "dex", "security"]
+
+[project.urls]
+Homepage = "https://github.com/ajstrick81/SeamHunter"
+Source = "https://github.com/ajstrick81/SeamHunter"
+
+[project.scripts]
+seamhunter = "autopsy.cli:main"
+autopsy = "autopsy.cli:main"   # legacy alias
+
+[tool.setuptools.packages.find]
+include = ["autopsy*"]
+
+[tool.setuptools.package-data]
+"autopsy.kb" = ["*.json"]
+"autopsy" = ["gui_static/*", "gui_static/fonts/*"]

@@ -1,0 +1,7 @@
+*.autopsy/
+__pycache__/
+*.apk
+*.apkm
+*.xapk
+!tests/fixtures/*.apk
+!tests/fixtures/*.apkm
