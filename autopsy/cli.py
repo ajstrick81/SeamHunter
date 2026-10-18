@@ -210,7 +210,7 @@ def main(argv=None):
     s.add_argument("--fast", action="store_true", help="skip native string scanning (big .so files)")
     s.add_argument("--open", action="store_true", help="open report.html when done")
     s.add_argument("--no-java", action="store_true", help="skip jadx Java excerpts even if jadx is installed")
-    s.add_argument("--apktool", action="store_true", help="also write an apktool smali tree (for the repo's check.mjs)")
+    s.add_argument("--apktool", action="store_true", help="also write an apktool smali tree")
     s.add_argument("-q", "--quiet", action="store_true")
     s.set_defaults(fn=cmd_scan)
 

@@ -43,7 +43,7 @@ def _clip(text: str, n: int) -> str:
 
 
 def _trackers_md(t, full: bool) -> list[str]:
-    """Privacy audit section: trackers, where they start, kill switches, blocklist."""
+    """Privacy audit section: trackers, where they start, vendor controls, blocklist."""
     if not t:
         return []
     L = [f"## Trackers & analytics — {t['count']} found", ""]
@@ -65,7 +65,7 @@ def _trackers_md(t, full: bool) -> list[str]:
     ks = [k for k in t["kill_switches"]]
     if ks:
         L.append("")
-        L.append("**Manifest kill switches** (vendor-documented `<meta-data>`; an opt-in patch can set them):")
+        L.append("**Vendor control flags** (vendor-documented `<meta-data>` that influence tracking/personalization):")
         for k in ks:
             cur = k.get("current")
             now = "not set (SDK default = on)" if cur is None else f"currently `{cur}`" + (f" via `{k['via']}`" if k.get("via") else "")
@@ -112,7 +112,7 @@ def render(f: dict, full: bool = False) -> str:
     if warns:
         L.append("> **Warnings:** " + " · ".join(_t(w, 300) for w in warns))
         L.append("")
-    L.append("## Where to cut (prioritised)")
+    L.append("## Investigation points (prioritised)")
     L += [f"{i}. {p}" for i, p in enumerate(f.get("plan", []), 1)]
     L.append("")
 
@@ -203,7 +203,7 @@ def render(f: dict, full: bool = False) -> str:
         drafted = {h["sig"] for h in (f.get("drafts") or {}).get("hooks", [])}
         detail = [c for c in cands if c["sig"] in drafted] + \
                  [c for c in cands if c["sig"] not in drafted][: max(2, 6 - len(drafted))]
-        L.append("_Details: drafted hooks first (with code), then the top items that need review._")
+        L.append("_Details: candidate seams first, then the top items that need a closer read._")
         L.append("")
     drafted_sigs = {h["sig"] for h in (f.get("drafts") or {}).get("hooks", [])}
     for i, c in enumerate(detail, 1):
@@ -218,10 +218,12 @@ def render(f: dict, full: bool = False) -> str:
             L.append("- chain: " + " ← ".join(f"`{_t(x, 90)}`" for x in ch))
         pol = c.get("polarity")
         if pol and pol.get("neutral"):
-            L.append(f"- **polarity (from call sites, {pol.get('confidence')}):** return `{pol['neutral']}` to skip ads — "
-                     + "; ".join(pol["evidence"][:3]))
+            avoids = "false" if pol["neutral"] == "0x0" else "true"
+            enters = "true" if pol["neutral"] == "0x0" else "false"
+            L.append(f"- **branch map (from call sites, {pol.get('confidence')}):** returning `{avoids}` does not "
+                     f"enter the ad path; returning `{enters}` does — " + "; ".join(pol["evidence"][:3]))
         elif pol is not None:
-            L.append("- polarity: not provable from call sites — confirm by reading the callers")
+            L.append("- branch map: not provable from call sites — confirm by reading the callers")
         for fl in (c.get("dataflow") or [])[: (5 if full else 2)]:
             others = fl["other_readers"][:2] + fl["other_writers"][:2]
             L.append(f"- data: {fl['access']} `{_t(fl['field'], 100)}`" +
@@ -321,7 +323,7 @@ def render(f: dict, full: bool = False) -> str:
 
     pr = f["protections"]
     if pr:
-        L.append("## Protections & patching hazards")
+        L.append("## Protections & modification risks")
         L.append("")
         for p in pr:
             L.append(f"- **{p['label']}** ({p['severity']}){': ' + p['note'] if p['note'] else ''}")
@@ -331,14 +333,15 @@ def render(f: dict, full: bool = False) -> str:
 
     dr = f.get("drafts")
     if dr:
-        L.append("## Draft deliverables (repo house style)")
+        L.append("## Scoping deliverables")
         L.append("")
         L.append(f"Written to `{dr['dir']}/`: " + ", ".join(f"`{x}`" for x in dr["files"]))
         L.append("")
         for h in dr["hooks"]:
-            L.append(f"- auto-hooked `{h['sig']}` ({h['why']}): `{h['smali'].replace(chr(10), ' ; ')}`")
+            conf = h.get("confidence") or "see notes"
+            L.append(f"- candidate seam `{h['sig']}` ({h['why']}) — returns `{h['returnType']}`, {conf}")
         for r in dr["review"]:
-            L.append(f"- needs review `{r['sig']}` → {r['strategy']}")
+            L.append(f"- needs a closer read `{r['sig']}` → {r['strategy']}")
         L.append("")
     j = f.get("java") or {}
     if j and not j.get("available"):

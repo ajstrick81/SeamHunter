@@ -78,9 +78,10 @@ def _seam_md(i, c):
          + (f"; anchors: {', '.join(fp['anchors'])}" if fp.get("anchors") else "")]
     pol = c.get("polarity") or {}
     if c["ret"] == "Z" and pol.get("neutral") and pol.get("evidence"):
-        branch = "FALSE" if pol["neutral"] == "0x0" else "TRUE"
-        L.append(f"- **Control-flow note ({pol.get('confidence')}):** at the call sites examined, the "
-                 f"`{branch}` return is the one that leads into ad code — " + "; ".join(pol["evidence"][:2]))
+        avoids = "false" if pol["neutral"] == "0x0" else "true"
+        enters = "true" if pol["neutral"] == "0x0" else "false"
+        L.append(f"- **Branch map ({pol.get('confidence')}):** at the call sites examined, returning "
+                 f"`{avoids}` does not enter the ad path and returning `{enters}` does — " + "; ".join(pol["evidence"][:2]))
     for n in fp.get("notes", []):
         L.append(f"- _{n}_")
     if fp.get("descriptor"):

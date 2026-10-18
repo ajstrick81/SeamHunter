@@ -329,7 +329,7 @@ VIEWS.report = async (main, r) => {
   const m = f.manifest || {}, code = f.code || {}, ka = f.known_app, seams = f.seams || {};
   const name = displayName(s);
   const tabs = [
-    ['plan', 'Where to cut', (f.plan || []).length],
+    ['plan', 'Investigation points', (f.plan || []).length],
     ka ? ['drift', 'Drift', (ka.results || []).length] : null,
     ['seams', 'Seams', (seams.candidates || []).length],
     ['integration', 'Integration', (seams.integration_points || []).length],
@@ -390,7 +390,7 @@ const TABS = {
     const items = f.plan || [];
     el.innerHTML = `<ol class="plan" style="padding:0;margin:0">${items.map(p => {
       const alert = /^(DIFFERENT LINEAGE|NO DEX)|PATCH ABORTS/.test(p);
-      const hot = /^(FIX READY|HOOK)/.test(p);
+      const hot = /^(FIX READY|SEAM)/.test(p);
       return `<li class="${alert ? 'alert' : hot ? 'hot' : ''}"><div>${inline(p)}</div></li>`;
     }).join('')}</ol>`;
   },
@@ -505,7 +505,7 @@ const TABS = {
     let cur = names.find(n => n.endsWith('Fingerprints.kt')) || names[0];
     const draw = () => {
       el.innerHTML = `<div class="split"><div class="card pad files">${names.map(n => `<button class="${n === cur ? 'on' : ''}" data-f="${esc(n)}">${esc(n)}</button>`).join('')}
-        <p class="sub" style="margin-top:12px;font-size:12.5px">Drafts in the repo's house style. Only evidence-backed, low-risk hooks are auto-written — review before building.</p></div>
+        <p class="sub" style="margin-top:12px;font-size:12.5px">Scoping notes (SCOPING.md / VERIFY.md): evidence-backed candidate seams only — verify before acting.</p></div>
         <div class="card pad"><div class="row" style="margin-bottom:12px"><b class="mono">${esc(cur)}</b><span class="spacer"></span><button class="btn small" id="cp">${I.copy} Copy</button></div>
         <pre style="max-height:calc(100vh - 330px)">${esc(R.drafts[cur])}</pre></div></div>`;
       $$('[data-f]', el).forEach(b => b.onclick = () => { cur = b.dataset.f; draw(); });

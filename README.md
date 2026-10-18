@@ -61,6 +61,8 @@ seamhunter stream manifest.m3u8          # decode HLS/DASH/SCTE-35 ad markers
 
 The shipped knowledge base is **generic** (a taxonomy of ad-delivery mechanisms and SDK/marker
 signatures). No app-specific fingerprint catalog is distributed; the `apps` map is empty by design.
+The KB does name commercial **SDKs** (Google IMA, FreeWheel, ExoPlayer/media3, OkHttp, …) — that is
+factual SDK identification, the core job of an analyzer, and is intentionally retained.
 
 ## Scope & ethics
 

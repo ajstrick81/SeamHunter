@@ -80,7 +80,7 @@ def render(f: dict) -> str:
                  ("Known app", ka["key"] if ka else "no")):
         S.append(f"<div>{e(k)}</div><div>{e(v)}</div>")
     S.append("</div></section>")
-    S.append("<section id='plan'><h2>Where to cut</h2><ol class='plan'>" +
+    S.append("<section id='plan'><h2>Investigation points</h2><ol class='plan'>" +
              "".join(f"<li>{e(p)}</li>" for p in f.get("plan", [])) + "</ol></section>")
     if ka:
         S.append(f"<section id='known'><h2>Known app: {e(ka['key'])}</h2><div class='kv'>")
@@ -182,9 +182,9 @@ def render(f: dict) -> str:
         for p in f["protections"]) + "</ul></section>")
     dr = f.get("drafts")
     if dr:
-        S.append(f"<section><h2>Draft deliverables</h2><p>{code(dr['dir'])}: {e(', '.join(dr['files']))}</p><ul>" +
-                 "".join(f"<li>auto {code(h['sig'])} — {e(h['why'])}</li>" for h in dr["hooks"]) +
-                 "".join(f"<li class='mute'>review {code(r['sig'])} — {e(r['strategy'])}</li>" for r in dr["review"]) + "</ul></section>")
+        S.append(f"<section><h2>Scoping deliverables</h2><p>{code(dr['dir'])}: {e(', '.join(dr['files']))}</p><ul>" +
+                 "".join(f"<li>candidate {code(h['sig'])} — {e(h['why'])} (returns {e(h['returnType'])})</li>" for h in dr["hooks"]) +
+                 "".join(f"<li class='mute'>needs a closer read {code(r['sig'])} — {e(r['strategy'])}</li>" for r in dr["review"]) + "</ul></section>")
     S.append("<section id='manifest'><h2>Manifest</h2><pre>" + e(json.dumps(m, indent=1, ensure_ascii=False, default=str)) + "</pre></section>")
     S.append("<section id='code'><h2>Code</h2><pre>" + e(json.dumps(c, indent=1, ensure_ascii=False, default=str)[:60000]) + "</pre></section>")
     S.append("</main>")

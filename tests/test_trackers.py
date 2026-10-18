@@ -1,4 +1,4 @@
-"""Tracker audit: catalog sanity, synthetic scan shape, and (optional) Tubi ground truth."""
+"""Tracker audit: catalog sanity and synthetic-scan shape (no app-specific ground truth)."""
 import os
 import shutil
 import sys
@@ -10,7 +10,6 @@ from autopsy.analyze import Autopsy  # noqa: E402
 from autopsy.kb.trackers import CATEGORIES, TRACKERS  # noqa: E402
 
 FX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
-TUBI = os.environ.get("TUBI_APKM")
 
 
 class Catalog(unittest.TestCase):
@@ -39,30 +38,3 @@ class SyntheticScan(unittest.TestCase):
             self.assertEqual(t["count"], len(t["items"]))
         finally:
             shutil.rmtree(out, ignore_errors=True)
-
-
-@unittest.skipUnless(TUBI and os.path.exists(TUBI), "set TUBI_APKM to a Tubi TV .apkm (validated on 10.36)")
-class Tubi(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.out = tempfile.mkdtemp(prefix="autopsy-tubi-")
-        cls.t = Autopsy(TUBI, cls.out, log=lambda *a: None, java=False).run()["trackers"]
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.out, ignore_errors=True)
-
-    def test_known_trackers(self):
-        names = {i["name"] for i in self.t["items"]}
-        for n in ("Google Analytics for Firebase", "Adjust", "Braze", "Sentry", "Conviva", "OneTrust"):
-            self.assertIn(n, names)
-
-    def test_kill_switch_resolved_from_resource(self):
-        ks = {k["key"]: k for k in self.t["kill_switches"]}
-        k = ks["firebase_analytics_collection_deactivated"]
-        self.assertIs(k["current"], False)
-        self.assertEqual(k["via"], "bool/is_firebase_analytics_deactivated")
-
-    def test_config_hosts_never_in_safe_list(self):
-        self.assertIn("firebaseremoteconfig.googleapis.com", self.t["blocklist"]["never"])
-        self.assertNotIn("firebaseremoteconfig.googleapis.com", self.t["blocklist"]["safe"])

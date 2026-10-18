@@ -113,7 +113,7 @@ class Drift(unittest.TestCase):
     def test_statuses(self):
         _, out = scan("base.apk")
         idx = Index(out)
-        app = {"packages": ["org.fdroid.fdroid"], "fingerprints": [
+        app = {"packages": ["com.example.tvapp"], "fingerprints": [
             {"id": "Ok", "definingClass": "Lcom/example/tvapp/player/AdBreakScheduler;", "name": "getAdBreaks",
              "returnType": "Ljava/util/List", "parameters": []},
             {"id": "Sig", "definingClass": "Lcom/example/tvapp/player/AdBreakScheduler;", "name": "shouldPlayAd",
@@ -191,6 +191,30 @@ class Parity(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(out, dr["dir"], name)), name)
         for gone in ("Fingerprints.kt", "SkipAdsPatch.kt", "Constants.kt", "seam-map-overlay.json"):
             self.assertFalse(os.path.exists(os.path.join(out, dr["dir"], gone)), gone)
+
+
+class EndToEndCLI(unittest.TestCase):
+    """The full `scan` command must render every report file without crashing (report_md KeyError guard)."""
+
+    def test_scan_writes_all_reports(self):
+        from autopsy.cli import main
+        out = tempfile.mkdtemp(prefix="autopsy-cli-")
+        try:
+            try:
+                rc = main(["scan", os.path.join(FX, "sample.apkm"), "-o", out, "-q", "--no-java"])
+            except SystemExit as e:  # main() calls sys.exit(rc or 0)
+                rc = e.code
+            self.assertIn(rc, (None, 0))
+            for name in ("report.md", "report-full.md", "report.html", "report.json", "index.sqlite"):
+                p = os.path.join(out, name)
+                self.assertTrue(os.path.exists(p), name)
+                self.assertGreater(os.path.getsize(p), 0, name)
+            md = open(os.path.join(out, "report.md"), encoding="utf-8").read()
+            self.assertIn("Investigation points", md)       # neutral terminology
+            self.assertNotIn("auto-hooked", md)
+            self.assertNotIn("smali", md.lower().split("## investigation")[0])  # no payloads in the summary
+        finally:
+            shutil.rmtree(out, ignore_errors=True)
 
 
 class Regressions(unittest.TestCase):
