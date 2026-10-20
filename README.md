@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/branding/seamhunter-readme.png" alt="SeamHunter — find the seam, clip the ad" width="100%">
+</p>
+
 # SeamHunter
 
 **A local, offline static analyzer for Android (TV) `APK` / `APKM` / `XAPK` bundles.**
