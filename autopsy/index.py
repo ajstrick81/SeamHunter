@@ -7,6 +7,7 @@ methods use string Y", "show me method Z") is a millisecond query instead of a t
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import struct
 import time
@@ -93,7 +94,10 @@ def build(bundle, out_dir: str, log=print, extra_dex: list[tuple[str, str, bytes
         except (DexError, MemoryError) as e:
             log(f"  ! {split}:{entry}: {e}")
             continue
-        path = os.path.join(dex_dir, f"{dex_id:02d}_{os.path.basename(split)}_{entry.replace('/', '_')}")
+        # split/entry names come from the bundle: keep only safe characters, so a name like
+        # "classes\..\..\x.dex" cannot climb out of dex/ on Windows (where "\" separates paths)
+        safe = re.sub(r"[^\w.+-]", "_", f"{os.path.basename(split)}_{entry.replace('/', '_')}")[:120]
+        path = os.path.join(dex_dir, f"{dex_id:02d}_{safe}")
         with open(path, "wb") as f:
             f.write(data)
         # per-dex local->global id caches

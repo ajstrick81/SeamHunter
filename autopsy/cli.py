@@ -172,7 +172,7 @@ def cmd_tools(a):
 
 def cmd_update(a):
     from . import selfupdate
-    return selfupdate.rollback() if a.rollback else selfupdate.update(a.zip, force=a.force)
+    return selfupdate.rollback() if a.rollback else selfupdate.update(a.zip, force=a.force, yes=a.yes)
 
 
 def cmd_version(a):
@@ -290,6 +290,7 @@ def main(argv=None):
     s.add_argument("zip", nargs="?")
     s.add_argument("--rollback", action="store_true", help="restore the previous version")
     s.add_argument("--force", action="store_true", help="reinstall even if not newer")
+    s.add_argument("--yes", "-y", action="store_true", help="install the zip found in Downloads without asking")
     s.set_defaults(fn=cmd_update)
 
     s = sub.add_parser("version", help="installed version and install path")

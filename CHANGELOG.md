@@ -52,6 +52,29 @@ detects. No network, still analysis-only.
 - New synthetic, public-safe fixture `tests/fixtures/tubi_like.apk` (+ `make_tubi_like.py`) and
   regression coverage for all of the above; the original 38-test baseline is unchanged.
 
+### Hardening (security and robustness review)
+- **GUI keep-alive desync**: a POST rejected before its body was read (bad token, refused upload)
+  left the body on the keep-alive connection, where it was parsed as a second request. The server now
+  closes the connection instead.
+- **GUI token rules**: POSTs accept the session token only from the `X-Seam-Token` header, not `?t=`.
+  A cross-site page cannot add that header without a CORS preflight, so a token seen in a URL cannot
+  be replayed to delete scans or change settings.
+- **Sandboxed full report**: `report.html` (built from APK-controlled strings) now runs in an opaque
+  origin (`sandbox allow-scripts` in its CSP and on the iframe), so even a missed escape could not
+  reach the app window, its token or the API.
+- **Damaged splits**: a split inside an `.apkm`/`.xapk` with a broken central directory or a bad
+  CRC is skipped with a warning instead of crashing the whole scan.
+- **Zip bombs**: nested splits that would inflate past 4 GiB, or more than 50x their stored size
+  once over 256 MiB, are refused before being decompressed into memory.
+- **DEX file names**: names written under `dex/` keep only safe characters, so a crafted entry like
+  `classes\..\..\x.dex` cannot write outside the scan folder on Windows.
+- **cmd.exe fallback**: when jadx/apktool can only run through a `.bat`/`.cmd` launcher, arguments
+  containing `& | < > ^ % ! "` (for example a crafted DEX class name) are refused instead of being
+  re-parsed by the shell.
+- **`update` confirmation**: a zip picked automatically from Downloads is shown and must be
+  confirmed (or `--yes` passed) before it replaces the install and its tests run.
+- New regression tests: `tests/test_hardening.py`.
+
 ## 1.0.0 — first public release
 Initial public release of **SeamHunter**, a local static analyzer for Android (TV) APK/APKM bundles.
 

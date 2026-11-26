@@ -94,9 +94,24 @@ def jadx_cmd(jadx: str) -> list[str]:
     return [jadx]
 
 
+CMD_META = re.compile(r'[&|<>^%!"`\r\n]')
+
+
+def _shell_safe(cmd) -> None:
+    """cmd.exe re-parses a .bat launcher's arguments: `&`, `|` or `%VAR%` in one of them runs commands.
+    Class names come from the DEX and SeamHunter does not enforce the DEX naming rules, so a crafted APK
+    could carry one. Refuse instead of handing it to the shell."""
+    bad = [a for a in cmd[1:] if CMD_META.search(str(a))]
+    if bad:
+        raise ValueError(f"refusing to pass {bad[0][:80]!r} through cmd.exe (a .bat/.cmd launcher); use the "
+                         f"tool's .jar instead, e.g. `seamhunter tools install`")
+
+
 def _run(cmd, **kw):
     # only a bare .bat/.cmd launcher (no jar found) needs the shell on Windows
     shell = WIN and cmd[0].lower().endswith((".bat", ".cmd"))
+    if shell:
+        _shell_safe(cmd)
     return subprocess.run(cmd, shell=shell, **kw)
 
 
@@ -117,7 +132,11 @@ def jadx_class(out_dir, cls, tool=None):
         out = os.path.join(td, "out.java")
         cmd = jadx_cmd(jadx) + ["--single-class", java_name, "--single-class-output", out, "--no-debug-info",
                                 "--show-bad-code", os.path.join(idx.root, dex_path)]
-        r = _run(cmd, capture_output=True, text=True)
+        try:
+            r = _run(cmd, capture_output=True, text=True)
+        except ValueError as e:
+            print(e)
+            return 1
         if not os.path.exists(out):
             print(r.stdout[-2000:], r.stderr[-2000:])
             return 1
@@ -141,7 +160,7 @@ def jadx_source(idx, cls, jadx=None):
                                 "--show-bad-code", os.path.join(idx.root, dex_path)]
         try:
             _run(cmd, capture_output=True, text=True, timeout=180)
-        except (OSError, subprocess.TimeoutExpired):
+        except (OSError, ValueError, subprocess.TimeoutExpired):
             return None
         if not os.path.exists(out):
             return None
@@ -155,5 +174,8 @@ def apktool_tree(apk, out_dir):
         raise SystemExit("apktool not found: run `autopsy tools install`")
     cmd = ["java", "-jar", jar, "d", "-f", "-r", "-o", out_dir, apk] if jar.endswith(".jar") else \
         [jar, "d", "-f", "-r", "-o", out_dir, apk]
-    subprocess.run(cmd, check=True, shell=WIN and not jar.endswith(".jar"))
+    shell = WIN and not jar.endswith(".jar")
+    if shell:
+        _shell_safe(cmd)
+    subprocess.run(cmd, check=True, shell=shell)
     return out_dir

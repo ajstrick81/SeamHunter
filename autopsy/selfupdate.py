@@ -1,6 +1,6 @@
 """`autopsy update` — install a newer apk-autopsy zip over this install, keeping a backup.
 
-    autopsy update                 newest apk-autopsy*.zip in ~/Downloads (or pass a path)
+    autopsy update                 newest apk-autopsy*.zip in ~/Downloads (asks first; or pass a path)
     autopsy update --rollback      restore the previous version
     autopsy version                show installed version and install path
 
@@ -91,7 +91,21 @@ def _selftest():
     return ok
 
 
-def update(path=None, force=False):
+def _confirm(z: str, new: str) -> bool:
+    """An update replaces this install's code and then runs the new version's tests, so a zip picked
+    from Downloads on its own (not named by the user) is shown and confirmed first."""
+    print(f"found {z}\n  version {new} (installed: {__version__})")
+    if not sys.stdin or not sys.stdin.isatty():
+        print("not installing a zip that was picked automatically without confirmation: "
+              "pass its path, or add --yes")
+        return False
+    try:
+        return input("install it? [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
+def update(path=None, force=False, yes=False):
     z = find_zip(path)
     with zipfile.ZipFile(z) as zf:
         new, prefix = _zip_version(zf)
@@ -100,6 +114,8 @@ def update(path=None, force=False):
         if _ver(new) <= _ver(__version__) and not force:
             print(f"installed {__version__} is already >= {new} ({os.path.basename(z)}). Use --force to reinstall.")
             return 0
+        if not path and not yes and not _confirm(z, new):
+            return 1
         with tempfile.TemporaryDirectory() as td:
             zf.extractall(td)
             root = os.path.join(td, prefix) if prefix else td

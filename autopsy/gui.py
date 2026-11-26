@@ -587,6 +587,7 @@ class Gui:
         if left:
             os.remove(dest)
             return {"error": "upload interrupted"}
+        handler._body_done = True
         j = self.scanner.submit(Job(dest, dict(self.settings["scan"]), self.roots()[0], cleanup_input=True, display=name))
         return {"job": j.brief()}
 
@@ -665,9 +666,16 @@ def _handler(gui: Gui):
             pass
 
         def _send(self, body: bytes, ctype: str, code=200, extra=None):
+            # A request body we did not read (rejected POST, refused upload) would otherwise be parsed
+            # as the next request on this keep-alive connection. Close the connection instead.
+            unread = self.command == "POST" and not getattr(self, "_body_done", False)
+            if unread:
+                self.close_connection = True
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            if unread:
+                self.send_header("Connection", "close")
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
@@ -685,8 +693,12 @@ def _handler(gui: Gui):
                 self._send(b"forbidden host", "text/plain", 403)
                 return False
             if need_token:
-                qs = parse_qs(urlparse(self.path).query)
-                tok = self.headers.get("X-Seam-Token") or qs.get("t", [""])[0]
+                tok = self.headers.get("X-Seam-Token") or ""
+                if not tok and self.command == "GET":
+                    # ?t= exists only for <img>/<iframe> GETs, which cannot send headers. A POST must
+                    # carry the header: a cross-site page cannot add one without a CORS preflight
+                    # (which this server never grants), so a token seen in a URL cannot be replayed.
+                    tok = parse_qs(urlparse(self.path).query).get("t", [""])[0]
                 if not secrets.compare_digest(tok, gui.token):
                     self._send(b"bad token", "text/plain", 403)
                     return False
@@ -733,8 +745,12 @@ def _handler(gui: Gui):
                     data = fh.read()
                 extra = {"Cache-Control": "max-age=600"}
                 if f.endswith(".html"):
-                    extra = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
-                                                        "script-src 'unsafe-inline'; img-src data:"}
+                    # The report is built from APK-controlled strings. `sandbox` (without
+                    # allow-same-origin) runs it in an opaque origin, so even a missed escape could
+                    # not reach the app window, its token or the API.
+                    extra = {"Content-Security-Policy": "sandbox allow-scripts; default-src 'none'; "
+                                                        "style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                                                        "img-src data:"}
                 return self._send(data, MIME.get(os.path.splitext(f)[1], "application/octet-stream"), extra=extra)
             if u.path.startswith("/api/"):
                 try:
@@ -746,6 +762,7 @@ def _handler(gui: Gui):
             return self._send(b"not found", "text/plain", 404)
 
         def do_POST(self):
+            self._body_done = False  # one handler serves every request on a keep-alive connection
             if not self._guard():
                 return
             u = urlparse(self.path)
@@ -753,7 +770,9 @@ def _handler(gui: Gui):
                 if u.path == "/api/upload":
                     return self._json(gui.upload(self, parse_qs(u.query).get("name", [""])[0]))
                 n = int(self.headers.get("Content-Length") or 0)
-                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+                raw = self.rfile.read(n) if n > 0 else b""
+                self._body_done = len(raw) == max(n, 0)
+                body = json.loads(raw or b"{}")
                 return self._json(gui.api_post(u.path, body))
             except PermissionError as e:
                 return self._json({"error": str(e)}, 403)
