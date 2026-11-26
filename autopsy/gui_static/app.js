@@ -529,7 +529,7 @@ const TABS = {
       <h3>Splits</h3><pre style="max-height:260px">${(b.splits || []).map(x => `${x.name.padEnd(42)} ${fmtSize(x.size)}`).map(esc).join('\n')}</pre></div></div>`;
   },
   full(el, {dir}) {
-    el.innerHTML = `<iframe class="full" src="${fileUrl(dir, 'report.html')}" title="Full report"></iframe>`;
+    el.innerHTML = `<iframe class="full" sandbox="allow-scripts" src="${fileUrl(dir, 'report.html')}" title="Full report"></iframe>`;
   },
 };
 

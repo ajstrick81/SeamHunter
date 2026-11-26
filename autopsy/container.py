@@ -10,9 +10,19 @@ import io
 import json
 import os
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 
 DEX_MAGIC = b"dex\n"
+# Nested splits are decompressed into memory. Real splits are stored or barely compressible
+# (an APK is already a zip), so a split that inflates far past its stored size is a zip bomb.
+MAX_SPLIT_BYTES = 4 << 30      # 4 GiB: well past any real split
+BOMB_MIN_BYTES = 256 << 20     # only judge the ratio once a split would exceed 256 MiB
+BOMB_RATIO = 50
+# What zipfile/zlib raise for a damaged archive or entry (bad CRC or central directory, truncated
+# stream, unsupported version/method, corrupt deflate data).
+ZIP_ERRORS = (zipfile.BadZipFile, zlib.error, EOFError, ValueError, NotImplementedError, OverflowError,
+              RuntimeError, OSError)
 
 
 @dataclass
@@ -116,11 +126,26 @@ def open_bundle(path: str) -> Bundle:
                 b.warnings.append(f"{meta} is not valid JSON")
     for n in names:
         if n.lower().endswith(".apk"):
-            data = outer.read(n)
+            zi = outer.getinfo(n)
+            if (zi.file_size > MAX_SPLIT_BYTES or
+                    (zi.file_size > BOMB_MIN_BYTES and zi.file_size > BOMB_RATIO * max(zi.compress_size, 1))):
+                b.warnings.append(f"{n}: claims {zi.file_size:,} bytes from {zi.compress_size:,} stored "
+                                  f"(zip bomb or damaged entry) — skipped")
+                continue
+            try:
+                data = outer.read(n)
+            except ZIP_ERRORS as e:
+                b.warnings.append(f"{n}: unreadable ({type(e).__name__}: {str(e)[:80]}) — skipped")
+                continue
             if not _is_zip(data):
                 b.warnings.append(f"{n}: not a zip (encrypted split?) — skipped")
                 continue
-            b.splits.append(Split(n, zipfile.ZipFile(io.BytesIO(data)), len(data)))
+            try:
+                split_zip = zipfile.ZipFile(io.BytesIO(data))
+            except ZIP_ERRORS as e:
+                b.warnings.append(f"{n}: damaged zip ({type(e).__name__}: {str(e)[:80]}) — skipped")
+                continue
+            b.splits.append(Split(n, split_zip, len(data)))
         elif not n.endswith("/"):
             b.extra_files.append(n)
     if not b.splits:
