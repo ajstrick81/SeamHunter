@@ -12,6 +12,7 @@ import sqlite3
 import struct
 import time
 
+from .container import ZIP_ERRORS
 from .dex import Dex, DexError, flags_str
 from .kb.sdks import FRAMEWORK_PREFIXES, PREFIXES
 
@@ -84,7 +85,12 @@ def build(bundle, out_dir: str, log=print, extra_dex: list[tuple[str, str, bytes
     class_id = 0
     method_id = 0
     t0 = time.time()
-    sources = [(s.name, n, s.read(n)) for s, n in bundle.dex_entries()]
+    sources = []
+    for s, n in bundle.dex_entries():
+        try:
+            sources.append((s.name, n, s.read(n)))
+        except ZIP_ERRORS as e:  # one corrupt entry must not sink the scan
+            log(f"  ! {s.name}:{n}: unreadable ({type(e).__name__}: {str(e)[:80]}) — skipped")
     sources += extra_dex or []
     total_insns = 0
     total_bad = 0

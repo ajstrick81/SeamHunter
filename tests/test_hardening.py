@@ -53,6 +53,26 @@ class Bundles(unittest.TestCase):
         self.assertEqual([s.name for s in b.splits], ["base.apk"])
         self.assertTrue(any("split_config.en.apk" in w for w in b.warnings))
 
+    def test_corrupt_dex_inside_a_good_split_does_not_sink_the_scan(self):
+        # the split opens fine (intact central directory), but its classes.dex fails the CRC check
+        src = zipfile.ZipFile(io.BytesIO(BASE))
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+            for zi in src.infolist():
+                z.writestr(zi.filename, src.read(zi.filename))
+        split = bytearray(buf.getvalue())
+        hdr = split.find(b"PK\x03\x04")  # walk the local headers to classes.dex
+        while hdr != -1 and split[hdr + 30:hdr + 30 + 11] != b"classes.dex":
+            hdr = split.find(b"PK\x03\x04", hdr + 4)
+        name_len = int.from_bytes(split[hdr + 26:hdr + 28], "little")
+        extra_len = int.from_bytes(split[hdr + 28:hdr + 30], "little")
+        split[hdr + 30 + name_len + extra_len + 200] ^= 0xFF
+        p = self._apkm("dexcrc.apkm", [("base.apk", BASE), ("split_config.en.apk", bytes(split))])
+        logs = []
+        f = Autopsy(p, os.path.join(self.tmp, "out"), log=logs.append, java=False).run()
+        self.assertEqual(f["manifest"].get("package"), "com.example.tvapp")
+        self.assertTrue(any("unreadable" in str(x) for x in logs), logs[-10:])
+
     def test_highly_compressed_split_is_refused_as_a_bomb(self):
         bomb = b"\0" * 2_000_000
         p = self._apkm("bomb.apkm", [("base.apk", BASE), ("split_config.bomb.apk", bomb)], zipfile.ZIP_DEFLATED)

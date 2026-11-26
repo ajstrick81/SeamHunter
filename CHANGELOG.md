@@ -62,8 +62,10 @@ detects. No network, still analysis-only.
 - **Sandboxed full report**: `report.html` (built from APK-controlled strings) now runs in an opaque
   origin (`sandbox allow-scripts` in its CSP and on the iframe), so even a missed escape could not
   reach the app window, its token or the API.
-- **Damaged splits**: a split inside an `.apkm`/`.xapk` with a broken central directory or a bad
-  CRC is skipped with a warning instead of crashing the whole scan.
+- **Damaged splits and entries**: a split inside an `.apkm`/`.xapk` with a broken central directory
+  or a bad CRC is skipped with a warning, and a corrupt `classes*.dex` inside a split that still
+  opens is logged and skipped, instead of either crashing the whole scan. New audit:
+  `tests/audit/apkm.py` (150 of 150 corrupted bundles now scan; 103 of 150 did before).
 - **Zip bombs**: nested splits that would inflate past 4 GiB, or more than 50x their stored size
   once over 256 MiB, are refused before being decompressed into memory.
 - **DEX file names**: names written under `dex/` keep only safe characters, so a crafted entry like

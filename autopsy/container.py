@@ -19,6 +19,10 @@ DEX_MAGIC = b"dex\n"
 MAX_SPLIT_BYTES = 4 << 30      # 4 GiB: well past any real split
 BOMB_MIN_BYTES = 256 << 20     # only judge the ratio once a split would exceed 256 MiB
 BOMB_RATIO = 50
+# What zipfile/zlib raise for a damaged archive or entry (bad CRC or central directory, truncated
+# stream, unsupported version/method, corrupt deflate data).
+ZIP_ERRORS = (zipfile.BadZipFile, zlib.error, EOFError, ValueError, NotImplementedError, OverflowError,
+              RuntimeError, OSError)
 
 
 @dataclass
@@ -130,7 +134,7 @@ def open_bundle(path: str) -> Bundle:
                 continue
             try:
                 data = outer.read(n)
-            except (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError, RuntimeError) as e:
+            except ZIP_ERRORS as e:
                 b.warnings.append(f"{n}: unreadable ({type(e).__name__}: {str(e)[:80]}) — skipped")
                 continue
             if not _is_zip(data):
@@ -138,7 +142,7 @@ def open_bundle(path: str) -> Bundle:
                 continue
             try:
                 split_zip = zipfile.ZipFile(io.BytesIO(data))
-            except (zipfile.BadZipFile, EOFError, ValueError) as e:
+            except ZIP_ERRORS as e:
                 b.warnings.append(f"{n}: damaged zip ({type(e).__name__}: {str(e)[:80]}) — skipped")
                 continue
             b.splits.append(Split(n, split_zip, len(data)))
